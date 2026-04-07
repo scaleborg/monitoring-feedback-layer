@@ -89,17 +89,22 @@ def adapt_p4_bundle(bundle_dir: Path) -> TrainingMetadata:
     model_uri_path = bundle_dir / "model_uri.txt"
     artifact_path = model_uri_path.read_text().strip() if model_uri_path.exists() else f"runs:/{run_id}/model"
 
-    # P4 does not store input_dataset info or start/end times in the bundle.
-    # Use created_at as completed_at and started_at = completed_at (duration=0)
-    # until P4 emits these fields.
+    # Use real input dataset fields and timestamps if P4 emits them,
+    # otherwise fall back to defaults for older bundles.
+    input_dataset_name = meta_raw.get("input_dataset_name", "unknown")
+    input_dataset_version = meta_raw.get("input_dataset_version", "unknown")
+
+    started_at = datetime.fromisoformat(meta_raw["started_at"]) if "started_at" in meta_raw else created_at
+    completed_at = datetime.fromisoformat(meta_raw["completed_at"]) if "completed_at" in meta_raw else created_at
+
     return TrainingMetadata(
         run_id=run_id,
         model_name=candidate_name,
         model_version=model_type,
-        input_dataset_name="unknown",
-        input_dataset_version="unknown",
-        started_at=created_at,
-        completed_at=created_at,
+        input_dataset_name=input_dataset_name,
+        input_dataset_version=input_dataset_version,
+        started_at=started_at,
+        completed_at=completed_at,
         metrics=TrainingMetrics(rmse=rmse, mae=mae),
         artifact_path=artifact_path,
     )

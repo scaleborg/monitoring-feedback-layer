@@ -15,4 +15,4 @@ P2_PARQUET_PATH = Path.home() / "projects/mobility-feature-pipeline/output/train
 # First real P4 inference bundle produced by train-and-register pipeline.
 # The adapter (contracts.adapters.adapt_p4_bundle) reads metadata.json +
 # metrics.json from the bundle directory and constructs a TrainingMetadata contract.
-P4_BUNDLE_PATH = Path.home() / "projects/ml-training-orchestrator/artifacts/eea15be8c4b74bf5a6229a114e330c97"
+P4_BUNDLE_PATH = Path.home() / "projects/ml-training-orchestrator/artifacts/85ec755803a448fea3d2efb49b66ce5e"
