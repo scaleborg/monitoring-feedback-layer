@@ -21,6 +21,20 @@ P6 observes metadata artifacts emitted by P2–P5 and produces lineage events, f
 - **P4 → P6**: Training run metadata (run_id, model, input dataset, duration, metrics)
 - **P5 → P6** *(future)*: Prediction metadata (model version, latency, request counts)
 
+```mermaid
+flowchart LR
+    P2[P2 · Feature Pipeline] -->|parquet metadata| A[Contracts + Adapters]
+    P4[P4 · Training Orchestrator] -->|bundle JSON| A
+    A --> L[Lineage Emitter]
+    A --> F[Freshness Compute]
+    A --> V[Validation Checks]
+    A --> M[Metrics Registry]
+    L -->|NDJSON| logs[logs/lineage/]
+    M -->|/metrics| prom[Prometheus endpoint]
+    F -->|JSON| stdout[stdout]
+    V -->|JSON| stdout
+```
+
 ## Upstream / downstream contracts
 
 ### Input: Dataset metadata (P2 → P6)
@@ -99,13 +113,13 @@ monitoring-feedback-layer/
       checks.py               # Metadata validation checks
   tests/
     fixtures/                 # Sample metadata JSON files + P4 bundle
-    test_contracts.py
     test_adapters.py
-    test_lineage.py
+    test_cli_metrics.py
+    test_contracts.py
     test_freshness.py
-    test_validation.py
+    test_lineage.py
     test_metrics.py
-  configs/
+    test_validation.py
   pyproject.toml
   README.md
 ```
@@ -125,8 +139,11 @@ monitoring compute-freshness --metadata-path tests/fixtures/dataset_metadata.jso
 # Run validation checks
 monitoring run-checks --metadata-path tests/fixtures/dataset_metadata.json
 
-# Serve Prometheus metrics
+# Serve Prometheus metrics (empty registry)
 monitoring serve-metrics --port 8000
+
+# Serve metrics with sample data pre-populated
+monitoring demo-metrics --port 8000
 
 # Simulate prediction events
 monitoring simulate-prediction --count 10 --model-name bike_demand_model
