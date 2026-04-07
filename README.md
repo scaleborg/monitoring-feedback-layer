@@ -280,6 +280,21 @@ modified yet — these are noted for future alignment.
 **P2 — optional, removes pyarrow dependency:**
 - Emit a standalone `dataset_metadata.json` alongside the parquet file
 
+## Phase 2 — Dagster runtime
+
+Dagster is the intended orchestration and scheduling layer for P6. It replaces
+the earlier GitHub Actions scheduled workflow as the runtime direction. The
+existing CLI commands remain the execution surface — Dagster assets call the
+underlying Python functions directly rather than shelling out.
+
+Dagster definitions live in `src/monitoring/dagster/` and can be loaded with:
+
+```bash
+DAGSTER_HOME=/tmp/dagster_home dagster dev -m monitoring.dagster.defs
+```
+
+GitHub Actions will be reserved for CI/CD (linting, tests) only.
+
 ## Future extensions
 
 - **OpenLineage backend** — Replace local NDJSON with OpenLineage-compatible emission to Marquez or similar
