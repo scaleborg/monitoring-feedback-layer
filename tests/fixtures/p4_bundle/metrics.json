@@ -1,0 +1,6 @@
+{
+  "val_rmse": 0.2451,
+  "val_mae": 0.1532,
+  "test_rmse": 0.182,
+  "test_mae": 0.11
+}

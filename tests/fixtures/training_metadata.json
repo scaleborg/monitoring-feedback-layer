@@ -1,0 +1,14 @@
+{
+  "run_id": "run_2026_04_07_001",
+  "model_name": "bike_demand_model",
+  "model_version": "v1",
+  "input_dataset_name": "bike_demand_pti",
+  "input_dataset_version": "2026-04-07T08:00:00Z",
+  "started_at": "2026-04-07T08:10:00Z",
+  "completed_at": "2026-04-07T08:12:30Z",
+  "metrics": {
+    "rmse": 0.182,
+    "mae": 0.11
+  },
+  "artifact_path": "models/v1/model.pkl"
+}

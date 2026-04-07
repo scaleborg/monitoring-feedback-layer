@@ -1,0 +1,13 @@
+CLAUDE.md
+.DS_Store
+__pycache__/
+*.pyc
+.venv/
+.env
+.pytest_cache/
+logs/
+.coverage
+htmlcov/
+*.egg-info/
+dist/
+build/

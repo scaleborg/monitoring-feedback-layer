@@ -1,0 +1,11 @@
+{
+  "dataset_name": "bike_demand_pti",
+  "dataset_version": "2026-04-07T08:00:00Z",
+  "path": "exports/bike_demand_pti/2026-04-07/data.parquet",
+  "row_count": 1245231,
+  "feature_count": 38,
+  "target": "target_empty_next_hour",
+  "entity": "station_id",
+  "event_ts": "obs_ts",
+  "schema_version": "v1"
+}
