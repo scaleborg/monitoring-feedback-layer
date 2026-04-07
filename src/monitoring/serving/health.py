@@ -11,10 +11,8 @@ from monitoring.contracts.serving import ServingMetricsWindow
 
 HealthStatus = Literal[
     "healthy",
-    "degraded_latency",
-    "degraded_errors",
-    "stale",
-    "no_traffic",
+    "degraded",
+    "unhealthy",
 ]
 
 # The field used to partition windows into per-deployment groups.
@@ -31,6 +29,9 @@ class ServingHealthThresholds(BaseModel):
     rejection_rate_pct: float = 5.0
     expected_window_seconds: float = 60.0
     max_allowed_gap_factor: float = 2.0
+    max_missing_windows: int = 3
+    max_gap_minutes: float = 5.0
+    max_staleness_minutes: float = 10.0
 
 
 class DeploymentHealthState(BaseModel):
@@ -65,6 +66,18 @@ def _count_missing_windows(
             expected_windows = int(gap / expected_seconds) - 1
             missing += max(expected_windows, 1)
     return missing
+
+
+def _compute_max_gap_minutes(windows: list[ServingMetricsWindow]) -> float:
+    """Return the largest gap in minutes between consecutive window_starts."""
+    if len(windows) < 2:
+        return 0.0
+    max_gap = 0.0
+    for i in range(1, len(windows)):
+        gap = (windows[i].window_start - windows[i - 1].window_start).total_seconds() / 60.0
+        if gap > max_gap:
+            max_gap = gap
+    return max_gap
 
 
 def classify_deployment(
@@ -123,30 +136,46 @@ def classify_deployment(
             detail=detail,
         )
 
-    # Check staleness
     staleness_seconds = (eval_time_aware - latest_window_end).total_seconds()
-    if staleness_seconds > thresholds.stale_window_seconds:
-        return _make("stale", f"latest window {staleness_seconds:.0f}s old (threshold {thresholds.stale_window_seconds:.0f}s)")
+    staleness_minutes = staleness_seconds / 60.0
+    max_gap = _compute_max_gap_minutes(sorted_windows)
 
-    # Check no_traffic
+    # ── Unhealthy: severe staleness / long inactivity ──
+    if staleness_minutes > thresholds.max_staleness_minutes:
+        return _make(
+            "unhealthy",
+            f"staleness {staleness_minutes:.1f}min > {thresholds.max_staleness_minutes:.1f}min",
+        )
+
     total_requests = sum(w.request_count for w in sorted_windows)
     if total_requests == 0:
-        return _make("no_traffic", "request_count == 0 across all evaluated windows")
+        return _make("unhealthy", "request_count == 0 across all evaluated windows")
 
-    # Check degraded_latency (on latest window)
+    # ── Degraded: gaps, missing windows, latency, errors ──
+    if missing_count > thresholds.max_missing_windows:
+        return _make(
+            "degraded",
+            f"missing_windows={missing_count} > {thresholds.max_missing_windows}",
+        )
+
+    if max_gap > thresholds.max_gap_minutes:
+        return _make(
+            "degraded",
+            f"max_gap={max_gap:.1f}min > {thresholds.max_gap_minutes:.1f}min",
+        )
+
     if latest.latency_p95_ms > thresholds.latency_p95_ms:
-        return _make("degraded_latency", f"p95={latest.latency_p95_ms:.1f}ms > {thresholds.latency_p95_ms:.1f}ms")
+        return _make("degraded", f"p95={latest.latency_p95_ms:.1f}ms > {thresholds.latency_p95_ms:.1f}ms")
     if latest.latency_p99_ms > thresholds.latency_p99_ms:
-        return _make("degraded_latency", f"p99={latest.latency_p99_ms:.1f}ms > {thresholds.latency_p99_ms:.1f}ms")
+        return _make("degraded", f"p99={latest.latency_p99_ms:.1f}ms > {thresholds.latency_p99_ms:.1f}ms")
 
-    # Check degraded_errors (on latest window)
     if latest.request_count > 0:
         failure_rate = (latest.failure_count / latest.request_count) * 100
         rejection_rate = (latest.rejected_count / latest.request_count) * 100
         if failure_rate > thresholds.failure_rate_pct:
-            return _make("degraded_errors", f"failure_rate={failure_rate:.1f}% > {thresholds.failure_rate_pct:.1f}%")
+            return _make("degraded", f"failure_rate={failure_rate:.1f}% > {thresholds.failure_rate_pct:.1f}%")
         if rejection_rate > thresholds.rejection_rate_pct:
-            return _make("degraded_errors", f"rejection_rate={rejection_rate:.1f}% > {thresholds.rejection_rate_pct:.1f}%")
+            return _make("degraded", f"rejection_rate={rejection_rate:.1f}% > {thresholds.rejection_rate_pct:.1f}%")
 
     return _make("healthy", "all checks passed")
 

@@ -13,6 +13,7 @@ from monitoring.serving.health import (
     ServingHealthThresholds,
     classify_deployment,
     compute_serving_health,
+    _compute_max_gap_minutes,
     _count_missing_windows,
 )
 from monitoring.serving.ingest import ingest_serving_metrics
@@ -238,27 +239,28 @@ class TestServingMetricsIngestion:
 
 class TestFreshnessAndGaps:
     def test_stale_detection(self):
-        """Window older than stale threshold → stale status."""
+        """Window older than staleness threshold → unhealthy."""
         w = ServingMetricsWindow.model_validate(_make_window(
             window_start="2026-04-07T08:59:00Z",
             window_end="2026-04-07T09:00:00Z",
         ))
-        thresholds = ServingHealthThresholds(stale_window_seconds=300)
-        # Eval 10 minutes after window_end → stale
+        thresholds = ServingHealthThresholds(max_staleness_minutes=5.0)
+        # Eval 10 minutes after window_end → unhealthy
         eval_time = datetime(2026, 4, 7, 9, 10, 0, tzinfo=timezone.utc)
         state = classify_deployment([w], thresholds, eval_time)
-        assert state.status == "stale"
+        assert state.status == "unhealthy"
+        assert "staleness" in state.detail
 
     def test_not_stale_within_threshold(self):
-        """Window within stale threshold → not stale (may be healthy)."""
+        """Window within staleness threshold → not unhealthy."""
         w = ServingMetricsWindow.model_validate(_make_window(
             window_start="2026-04-07T09:59:00Z",
             window_end="2026-04-07T10:00:00Z",
         ))
-        thresholds = ServingHealthThresholds(stale_window_seconds=300)
+        thresholds = ServingHealthThresholds(max_staleness_minutes=5.0)
         eval_time = datetime(2026, 4, 7, 10, 2, 0, tzinfo=timezone.utc)
         state = classify_deployment([w], thresholds, eval_time)
-        assert state.status != "stale"
+        assert state.status != "unhealthy"
 
     def test_missing_window_gap_detection(self):
         """3-minute gap in 60s cadence → detected missing windows."""
@@ -296,7 +298,7 @@ class TestFreshnessAndGaps:
 
 class TestHealthClassification:
     def test_degraded_latency_p95(self):
-        """p95 above threshold → degraded_latency."""
+        """p95 above threshold → degraded."""
         w = ServingMetricsWindow.model_validate(_make_window(
             latency_p95_ms=600.0,
             window_end="2026-04-07T10:01:00Z",
@@ -304,11 +306,11 @@ class TestHealthClassification:
         thresholds = ServingHealthThresholds(latency_p95_ms=500.0)
         eval_time = datetime(2026, 4, 7, 10, 2, 0, tzinfo=timezone.utc)
         state = classify_deployment([w], thresholds, eval_time)
-        assert state.status == "degraded_latency"
+        assert state.status == "degraded"
         assert "p95" in state.detail
 
     def test_degraded_latency_p99(self):
-        """p99 above threshold → degraded_latency."""
+        """p99 above threshold → degraded."""
         w = ServingMetricsWindow.model_validate(_make_window(
             latency_p95_ms=400.0,  # p95 OK
             latency_p99_ms=1200.0,  # p99 bad
@@ -317,11 +319,11 @@ class TestHealthClassification:
         thresholds = ServingHealthThresholds(latency_p99_ms=1000.0)
         eval_time = datetime(2026, 4, 7, 10, 2, 0, tzinfo=timezone.utc)
         state = classify_deployment([w], thresholds, eval_time)
-        assert state.status == "degraded_latency"
+        assert state.status == "degraded"
         assert "p99" in state.detail
 
     def test_degraded_errors_failure_rate(self):
-        """Failure rate above threshold → degraded_errors."""
+        """Failure rate above threshold → degraded."""
         w = ServingMetricsWindow.model_validate(_make_window(
             request_count=100,
             failure_count=10,
@@ -331,11 +333,11 @@ class TestHealthClassification:
         thresholds = ServingHealthThresholds(failure_rate_pct=5.0)
         eval_time = datetime(2026, 4, 7, 10, 2, 0, tzinfo=timezone.utc)
         state = classify_deployment([w], thresholds, eval_time)
-        assert state.status == "degraded_errors"
+        assert state.status == "degraded"
         assert "failure_rate" in state.detail
 
     def test_degraded_errors_rejection_rate(self):
-        """Rejection rate above threshold → degraded_errors."""
+        """Rejection rate above threshold → degraded."""
         w = ServingMetricsWindow.model_validate(_make_window(
             request_count=100,
             failure_count=0,
@@ -345,11 +347,11 @@ class TestHealthClassification:
         thresholds = ServingHealthThresholds(rejection_rate_pct=5.0)
         eval_time = datetime(2026, 4, 7, 10, 2, 0, tzinfo=timezone.utc)
         state = classify_deployment([w], thresholds, eval_time)
-        assert state.status == "degraded_errors"
+        assert state.status == "degraded"
         assert "rejection_rate" in state.detail
 
     def test_no_traffic(self):
-        """request_count == 0 → no_traffic."""
+        """request_count == 0 → unhealthy."""
         w = ServingMetricsWindow.model_validate(_make_window(
             request_count=0,
             success_count=0,
@@ -360,7 +362,7 @@ class TestHealthClassification:
         thresholds = ServingHealthThresholds()
         eval_time = datetime(2026, 4, 7, 10, 2, 0, tzinfo=timezone.utc)
         state = classify_deployment([w], thresholds, eval_time)
-        assert state.status == "no_traffic"
+        assert state.status == "unhealthy"
 
     def test_healthy(self):
         """All metrics within thresholds → healthy."""
@@ -385,6 +387,151 @@ class TestHealthClassification:
         assert state.bundle_id == "bundle-abc"
         assert state.input_dataset_name == "bike_demand_pti"
         assert state.input_dataset_version == "2026-04-07T08:00:00Z"
+
+
+# ── C2. Hardened health: gaps, missing windows, staleness ────────────
+
+
+class TestHardenedHealth:
+    """Tests for gap-aware, missing-window-aware, staleness-aware classification."""
+
+    def test_healthy_continuous_windows(self):
+        """Continuous windows with good metrics → healthy."""
+        windows = [
+            ServingMetricsWindow.model_validate(_make_window(
+                window_start=f"2026-04-07T10:0{i}:00Z",
+                window_end=f"2026-04-07T10:0{i+1}:00Z",
+            ))
+            for i in range(5)
+        ]
+        thresholds = ServingHealthThresholds(
+            max_missing_windows=3,
+            max_gap_minutes=5.0,
+            max_staleness_minutes=10.0,
+        )
+        eval_time = datetime(2026, 4, 7, 10, 6, 0, tzinfo=timezone.utc)
+        state = classify_deployment(windows, thresholds, eval_time)
+        assert state.status == "healthy"
+        assert state.detail == "all checks passed"
+        assert state.missing_window_count == 0
+
+    def test_degraded_due_to_gap(self):
+        """Large gap between consecutive windows → degraded."""
+        w1 = ServingMetricsWindow.model_validate(_make_window(
+            window_start="2026-04-07T10:00:00Z",
+            window_end="2026-04-07T10:01:00Z",
+        ))
+        # 8-minute gap
+        w2 = ServingMetricsWindow.model_validate(_make_window(
+            window_start="2026-04-07T10:08:00Z",
+            window_end="2026-04-07T10:09:00Z",
+        ))
+        thresholds = ServingHealthThresholds(
+            max_missing_windows=100,  # high so gap check triggers first
+            max_gap_minutes=5.0,
+            max_staleness_minutes=10.0,
+        )
+        eval_time = datetime(2026, 4, 7, 10, 10, 0, tzinfo=timezone.utc)
+        state = classify_deployment([w1, w2], thresholds, eval_time)
+        assert state.status == "degraded"
+        assert "max_gap" in state.detail
+
+    def test_degraded_due_to_missing_windows(self):
+        """Too many missing windows → degraded."""
+        w1 = ServingMetricsWindow.model_validate(_make_window(
+            window_start="2026-04-07T10:00:00Z",
+            window_end="2026-04-07T10:01:00Z",
+        ))
+        # 6-minute gap → ~5 missing windows in 60s cadence
+        w2 = ServingMetricsWindow.model_validate(_make_window(
+            window_start="2026-04-07T10:06:00Z",
+            window_end="2026-04-07T10:07:00Z",
+        ))
+        thresholds = ServingHealthThresholds(
+            max_missing_windows=2,
+            max_gap_minutes=10.0,  # high gap threshold so gap check doesn't trigger first
+            max_staleness_minutes=10.0,
+        )
+        eval_time = datetime(2026, 4, 7, 10, 8, 0, tzinfo=timezone.utc)
+        state = classify_deployment([w1, w2], thresholds, eval_time)
+        assert state.status == "degraded"
+        assert "missing_windows" in state.detail
+
+    def test_unhealthy_due_to_long_inactivity(self):
+        """Staleness exceeding max_staleness_minutes → unhealthy."""
+        w = ServingMetricsWindow.model_validate(_make_window(
+            window_start="2026-04-07T09:00:00Z",
+            window_end="2026-04-07T09:01:00Z",
+        ))
+        thresholds = ServingHealthThresholds(max_staleness_minutes=10.0)
+        # 30 minutes after last window
+        eval_time = datetime(2026, 4, 7, 9, 31, 0, tzinfo=timezone.utc)
+        state = classify_deployment([w], thresholds, eval_time)
+        assert state.status == "unhealthy"
+        assert "staleness" in state.detail
+
+    def test_unhealthy_takes_priority_over_degraded(self):
+        """When both staleness and gaps are bad, unhealthy wins."""
+        w1 = ServingMetricsWindow.model_validate(_make_window(
+            window_start="2026-04-07T08:00:00Z",
+            window_end="2026-04-07T08:01:00Z",
+        ))
+        w2 = ServingMetricsWindow.model_validate(_make_window(
+            window_start="2026-04-07T08:10:00Z",
+            window_end="2026-04-07T08:11:00Z",
+        ))
+        thresholds = ServingHealthThresholds(
+            max_missing_windows=2,
+            max_gap_minutes=5.0,
+            max_staleness_minutes=10.0,
+        )
+        # 50 minutes after last window → unhealthy
+        eval_time = datetime(2026, 4, 7, 9, 0, 0, tzinfo=timezone.utc)
+        state = classify_deployment([w1, w2], thresholds, eval_time)
+        assert state.status == "unhealthy"
+
+    def test_max_gap_minutes_helper(self):
+        """_compute_max_gap_minutes returns correct max gap."""
+        windows = [
+            ServingMetricsWindow.model_validate(_make_window(
+                window_start="2026-04-07T10:00:00Z",
+                window_end="2026-04-07T10:01:00Z",
+            )),
+            ServingMetricsWindow.model_validate(_make_window(
+                window_start="2026-04-07T10:01:00Z",
+                window_end="2026-04-07T10:02:00Z",
+            )),
+            ServingMetricsWindow.model_validate(_make_window(
+                window_start="2026-04-07T10:05:00Z",
+                window_end="2026-04-07T10:06:00Z",
+            )),
+        ]
+        assert _compute_max_gap_minutes(windows) == 4.0
+
+    def test_max_gap_minutes_single_window(self):
+        """Single window → 0 gap."""
+        w = ServingMetricsWindow.model_validate(_make_window())
+        assert _compute_max_gap_minutes([w]) == 0.0
+
+    def test_degraded_missing_windows_boundary(self):
+        """Exactly at max_missing_windows → not degraded (must exceed)."""
+        w1 = ServingMetricsWindow.model_validate(_make_window(
+            window_start="2026-04-07T10:00:00Z",
+            window_end="2026-04-07T10:01:00Z",
+        ))
+        # 4-minute gap → 3 missing windows in 60s cadence
+        w2 = ServingMetricsWindow.model_validate(_make_window(
+            window_start="2026-04-07T10:04:00Z",
+            window_end="2026-04-07T10:05:00Z",
+        ))
+        thresholds = ServingHealthThresholds(
+            max_missing_windows=3,
+            max_gap_minutes=10.0,
+            max_staleness_minutes=10.0,
+        )
+        eval_time = datetime(2026, 4, 7, 10, 6, 0, tzinfo=timezone.utc)
+        state = classify_deployment([w1, w2], thresholds, eval_time)
+        assert state.status == "healthy"
 
 
 # ── D. Multi-deployment ──────────────────────────────────────────────
@@ -428,4 +575,4 @@ class TestMultiDeploymentHealth:
         assert len(states) == 2
         by_dep = {s.deployment_id: s for s in states}
         assert by_dep["dep-001"].status == "healthy"
-        assert by_dep["dep-002"].status == "no_traffic"
+        assert by_dep["dep-002"].status == "unhealthy"
