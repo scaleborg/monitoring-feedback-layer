@@ -16,3 +16,9 @@ P2_PARQUET_PATH = Path.home() / "projects/mobility-feature-pipeline/output/train
 # The adapter (contracts.adapters.adapt_p4_bundle) reads metadata.json +
 # metrics.json from the bundle directory and constructs a TrainingMetadata contract.
 P4_BUNDLE_PATH = Path.home() / "projects/ml-training-orchestrator/artifacts/85ec755803a448fea3d2efb49b66ce5e"
+
+# --- P5: Serving metrics artifact tree ---
+# P5 repo root. The ingestion module reads from the date/hour/minute
+# artifact layout under {P5_BASE_DIR}/artifacts/serving/metrics/.
+# See: mobility-serving-layer/contracts/serving_observability.md
+P5_BASE_DIR = Path.home() / "Projects/mobility-serving-layer"

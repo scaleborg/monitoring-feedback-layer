@@ -19,7 +19,7 @@ P6 observes metadata artifacts emitted by P2–P5 and produces lineage events, f
 
 - **P2 → P6**: Dataset build metadata (name, version, built_at, row/feature counts)
 - **P4 → P6**: Training run metadata (run_id, model, input dataset, duration, metrics)
-- **P5 → P6** *(future)*: Prediction metadata (model version, latency, request counts)
+- **P5 → P6**: Serving metrics windows (per-deployment latency, error counts, request volume)
 
 ```mermaid
 flowchart LR
@@ -195,7 +195,7 @@ or pushgateway) replaces the in-process HTTP server.
 |-------|--------|--------|
 | **P2** | Validated against real artifact | Adapter tested against `mobility-feature-pipeline/output/training_dataset_20260403_230612.parquet`. Lineage emission, freshness computation, and validation checks all ran successfully. |
 | **P4** | Adapter tested against expected format | No real P4 inference bundle exists yet (`artifacts/` directory does not exist in the P4 repo). The adapter was tested against a fixture built from P4's `bundle.py` code, matching the exact JSON schema it will produce. Awaiting first real training run. |
-| **P5** | Not integrated | No P5 contract defined yet. |
+| **P5** | Contract defined, health derivation implemented | `ServingMetricsWindow` JSONL ingestion with per-deployment health state classification. Awaiting first real P5 artifact. |
 
 ## P2 contract mapping (real artifact)
 
@@ -299,6 +299,6 @@ GitHub Actions will be reserved for CI/CD (linting, tests) only.
 
 - **OpenLineage backend** — Replace local NDJSON with OpenLineage-compatible emission to Marquez or similar
 - **Prometheus + Grafana integration** — Scrape from the metrics endpoint, build dashboards
-- **P5 prediction lineage** — Emit lineage events for prediction requests, linking model version to serving
+- **P5 dashboards / alerting** — Build dashboards and alerts on top of serving health state
 - **Retraining triggers** — When freshness exceeds a threshold, trigger P4 retraining via webhook or message
 - **Drift checks** — Statistical drift detection between training and serving distributions
