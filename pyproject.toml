@@ -9,6 +9,7 @@ dependencies = [
     "typer>=0.12,<1",
     "dagster>=1.9,<2",
     "dagster-webserver>=1.9,<2",
+    "pyarrow>=18,<20",
 ]
 
 [project.scripts]
