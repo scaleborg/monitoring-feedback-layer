@@ -2,7 +2,7 @@
 
 from dagster import asset
 
-from monitoring.dagster.config import P2_PARQUET_PATH, P4_TRAINING_METADATA_PATH
+from monitoring.dagster.config import P2_PARQUET_PATH, P4_BUNDLE_PATH
 
 
 @asset
@@ -66,18 +66,11 @@ def dataset_lineage() -> dict:
 
 @asset
 def training_lineage() -> dict:
-    """Emit a training run lineage event.
+    """Emit a training run lineage event from real P4 artifact."""
+    from monitoring.contracts.adapters import adapt_p4_bundle
+    from monitoring.lineage.emitter import build_training_lineage_event, persist_event
 
-    Uses expected-format fixture — no real P4 artifact exists yet.
-    Will switch to adapt_p4_bundle once P4 produces artifacts/<run_id>/.
-    """
-    from monitoring.lineage.emitter import (
-        build_training_lineage_event,
-        load_training_metadata,
-        persist_event,
-    )
-
-    meta = load_training_metadata(P4_TRAINING_METADATA_PATH)
+    meta = adapt_p4_bundle(P4_BUNDLE_PATH)
     event = build_training_lineage_event(meta)
     log_file = persist_event(event)
     return {"log_file": str(log_file), "event": event.model_dump(mode="json")}

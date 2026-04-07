@@ -11,8 +11,8 @@ from pathlib import Path
 # metadata and constructs a DatasetMetadata contract.
 P2_PARQUET_PATH = Path.home() / "projects/mobility-feature-pipeline/output/training_dataset_20260403_230612.parquet"
 
-# --- P4: No real artifact exists yet ---
-# P4 (ml-training-orchestrator) has not produced an artifacts/<run_id>/
-# bundle directory. The training_lineage asset uses the expected-format
-# fixture until a real training run is executed.
-P4_TRAINING_METADATA_PATH = Path("tests/fixtures/training_metadata.json")
+# --- P4: Real artifact exists ---
+# First real P4 inference bundle produced by train-and-register pipeline.
+# The adapter (contracts.adapters.adapt_p4_bundle) reads metadata.json +
+# metrics.json from the bundle directory and constructs a TrainingMetadata contract.
+P4_BUNDLE_PATH = Path.home() / "projects/ml-training-orchestrator/artifacts/eea15be8c4b74bf5a6229a114e330c97"
