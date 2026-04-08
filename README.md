@@ -375,22 +375,20 @@ print(event.model_dump_json(indent=2))
 "
 ```
 
-## TODO: upstream alignment for full lineage
+## Upstream alignment opportunities
 
-These changes would eliminate adapter workarounds. P2/P4 repos are not
-modified yet — these are noted for future alignment.
+P6 already consumes current upstream artifacts through adapters. The following
+upstream metadata additions would improve lineage fidelity and reduce
+fallback/default handling in the adapters. None are blockers.
 
-**P4 — required for first real validation:**
-- Run first real training pipeline to produce `artifacts/<run_id>/`
+**P4 — improved lineage linkage:**
+- `input_dataset_name` in `metadata.json` — eliminates `"unknown"` fallback
+- `input_dataset_version` in `metadata.json` — enables dataset↔model tracing
+- `started_at` timestamp in `metadata.json` — enables real training duration
+- `completed_at` timestamp in `metadata.json` — enables real training duration
 
-**P4 — required for full lineage linkage:**
-- Add `input_dataset_name` to `metadata.json`
-- Add `input_dataset_version` to `metadata.json`
-- Add `started_at` timestamp to `metadata.json`
-- Add `completed_at` timestamp to `metadata.json`
-
-**P2 — optional, removes pyarrow dependency:**
-- Emit a standalone `dataset_metadata.json` alongside the parquet file
+**P2 — simplified ingestion:**
+- Standalone `dataset_metadata.json` alongside the parquet file — removes pyarrow dependency for metadata reads
 
 ## Phase 2 — Dagster runtime
 
