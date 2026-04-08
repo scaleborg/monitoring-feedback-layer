@@ -22,7 +22,6 @@ DEPLOYMENT_GROUP_KEY = "deployment_id"
 class ServingHealthThresholds(BaseModel):
     """Configurable thresholds for health classification."""
 
-    stale_window_seconds: float = 300.0
     latency_p95_ms: float = 500.0
     latency_p99_ms: float = 1000.0
     failure_rate_pct: float = 5.0

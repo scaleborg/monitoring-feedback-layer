@@ -6,7 +6,7 @@ System-integrated monitoring and feedback layer for the urban mobility ML platfo
 
 | Layer | Repo | Role |
 |-------|------|------|
-| P1 | urban-mobility-control-tower | Orchestration and coordination |
+| P1 | urban-mobility-control-tower | Real-time data ingestion, CDC, streaming aggregation |
 | P2 | mobility-feature-pipeline | Feature engineering pipeline |
 | P3 | mobility-feature-store | Feature storage and serving |
 | P4 | ml-training-orchestrator | Model training |
@@ -25,14 +25,17 @@ P6 observes metadata artifacts emitted by P2–P5 and produces lineage events, f
 flowchart LR
     P2[P2 · Feature Pipeline] -->|parquet metadata| A[Contracts + Adapters]
     P4[P4 · Training Orchestrator] -->|bundle JSON| A
+    P5[P5 · Serving Layer] -->|JSONL metrics windows| S[Serving Ingest + Health]
     A --> L[Lineage Emitter]
     A --> F[Freshness Compute]
     A --> V[Validation Checks]
     A --> M[Metrics Registry]
+    S --> H[DeploymentHealthState]
     L -->|NDJSON| logs[logs/lineage/]
     M -->|/metrics| prom[Prometheus endpoint]
-    F -->|JSON| stdout[stdout]
-    V -->|JSON| stdout
+    F -->|FreshnessResult| stdout[stdout / Dagster]
+    V -->|CheckReport| stdout
+    H -->|per-deployment health| stdout
 ```
 
 ## Upstream / downstream contracts
@@ -70,6 +73,52 @@ flowchart LR
 }
 ```
 
+### Input: Serving metrics windows (P5 → P6)
+
+```json
+{
+  "schema_version": "v1",
+  "window_start": "2026-04-07T10:00:00Z",
+  "window_end": "2026-04-07T10:01:00Z",
+  "service_name": "mobility-serving-layer",
+  "service_version": "0.1.0",
+  "environment": "production",
+  "deployment_id": "dep-001",
+  "endpoint_name": "/predict",
+  "model_name": "bike_demand_model",
+  "model_version": "v1",
+  "bundle_id": "bundle-abc",
+  "input_dataset_name": "bike_demand_pti",
+  "input_dataset_version": "2026-04-07T08:00:00Z",
+  "request_count": 100,
+  "success_count": 98,
+  "failure_count": 1,
+  "rejected_count": 1,
+  "timeout_count": 0,
+  "latency_p50_ms": 12.0,
+  "latency_p95_ms": 45.0,
+  "latency_p99_ms": 120.0,
+  "validation_error_count": 0,
+  "feature_lookup_error_count": 0,
+  "model_load_error_count": 0,
+  "inference_runtime_error_count": 0,
+  "dependency_error_count": 0,
+  "internal_error_count": 0,
+  "input_schema_failure_count": 0,
+  "missing_required_field_count": 0,
+  "invalid_type_count": 0,
+  "domain_violation_count": 0,
+  "prediction_count": 98,
+  "prediction_null_count": 0,
+  "prediction_non_finite_count": 0,
+  "prediction_out_of_range_count": 0,
+  "fallback_prediction_count": 0,
+  "heartbeat_emitted_at": "2026-04-07T10:01:00Z"
+}
+```
+
+P5 emits JSONL files under `artifacts/serving/metrics/{date}/{hour}/`. P6 discovers and ingests all `.jsonl` files, validates each record against the `ServingMetricsWindow` contract, deduplicates on `(deployment_id, endpoint_name, window_start, window_end)`, and feeds the result into health classification.
+
 ### Output: Lineage events
 
 NDJSON files under `logs/lineage/` with dataset build and training run completion events. Each event links inputs to outputs with explicit artifact references.
@@ -81,6 +130,57 @@ NDJSON files under `logs/lineage/` with dataset build and training run completio
 - `ml_training_duration_seconds` (histogram)
 - `ml_prediction_total` (counter)
 - `ml_feature_freshness_seconds` (gauge)
+
+### Output: DeploymentHealthState
+
+Per-deployment health classification derived from serving metrics windows:
+
+```json
+{
+  "deployment_id": "dep-001",
+  "model_name": "bike_demand_model",
+  "model_version": "v1",
+  "bundle_id": "bundle-abc",
+  "input_dataset_name": "bike_demand_pti",
+  "input_dataset_version": "2026-04-07T08:00:00Z",
+  "status": "healthy",
+  "evaluated_windows": 5,
+  "latest_window_end": "2026-04-07T10:05:00Z",
+  "missing_window_count": 0,
+  "detail": "all checks passed"
+}
+```
+
+`status` is one of `healthy`, `degraded`, or `unhealthy`, classified by staleness, gap detection, latency thresholds, and error rates. See `serving/health.py` for threshold logic.
+
+### Output: FreshnessResult
+
+```json
+{
+  "dataset_name": "bike_demand_pti",
+  "dataset_version": "2026-04-07T08:00:00Z",
+  "freshness_seconds": 1200.0,
+  "status": "FRESH"
+}
+```
+
+`status` is `FRESH` or `STALE` based on a configurable threshold (default 1800s).
+
+### Output: CheckReport
+
+```json
+{
+  "metadata_path": "tests/fixtures/dataset_metadata.json",
+  "all_passed": true,
+  "results": [
+    {"check": "file_exists", "passed": true, "detail": ""},
+    {"check": "valid_json", "passed": true, "detail": ""},
+    {"check": "dataset_name_present", "passed": true, "detail": ""},
+    {"check": "dataset_version_present", "passed": true, "detail": ""},
+    {"check": "freshness_computable", "passed": true, "detail": ""}
+  ]
+}
+```
 
 ## MVP capabilities
 
@@ -100,6 +200,7 @@ monitoring-feedback-layer/
     contracts/
       dataset.py              # Dataset metadata pydantic model
       training.py             # Training metadata pydantic model
+      serving.py              # Serving metrics window contract (P5 → P6)
       adapters.py             # P2/P4 real artifact → P6 contract adapters
     lineage/
       schemas.py              # Lineage event pydantic models
@@ -111,14 +212,25 @@ monitoring-feedback-layer/
       compute.py              # Freshness computation
     validation/
       checks.py               # Metadata validation checks
+    serving/
+      ingest.py               # P5 JSONL discovery + ingestion
+      health.py               # Per-deployment health classification
+    dagster/
+      assets.py               # P2/P4 monitoring assets
+      serving_assets.py       # P5 serving health assets
+      jobs.py                 # Scheduled monitoring job
+      schedules.py            # Cron schedule
+      defs.py                 # Dagster definitions entrypoint
   tests/
     fixtures/                 # Sample metadata JSON files + P4 bundle
     test_adapters.py
     test_cli_metrics.py
     test_contracts.py
+    test_dagster_defs.py
     test_freshness.py
     test_lineage.py
     test_metrics.py
+    test_serving.py
     test_validation.py
   pyproject.toml
   README.md
@@ -194,8 +306,8 @@ or pushgateway) replaces the in-process HTTP server.
 | Layer | Status | Detail |
 |-------|--------|--------|
 | **P2** | Validated against real artifact | Adapter tested against `mobility-feature-pipeline/output/training_dataset_20260403_230612.parquet`. Lineage emission, freshness computation, and validation checks all ran successfully. |
-| **P4** | Adapter tested against expected format | No real P4 inference bundle exists yet (`artifacts/` directory does not exist in the P4 repo). The adapter was tested against a fixture built from P4's `bundle.py` code, matching the exact JSON schema it will produce. Awaiting first real training run. |
-| **P5** | Contract defined, health derivation implemented | `ServingMetricsWindow` JSONL ingestion with per-deployment health state classification. Awaiting first real P5 artifact. |
+| **P4** | Adapter tested against expected format | Adapter tested against a fixture built from P4's `bundle.py` code, matching the exact JSON schema it produces. Full validation requires a real training run to produce `artifacts/<run_id>/`. |
+| **P5** | Contract integrated, health derivation operational | `ServingMetricsWindow` JSONL ingestion with per-deployment health state classification. P5 emits structured serving artifacts consumed by P6. |
 
 ## P2 contract mapping (real artifact)
 
@@ -232,7 +344,7 @@ structure to the P6 `TrainingMetadata` contract:
 |----------|-------------------|---------|
 | `run_id` | `metadata.json -> run_id` | Direct |
 | `model_name` | `metadata.json -> candidate_name` | Renamed |
-| `model_version` | `metadata.json -> model_type` | Renamed |
+| `model_version` | `metadata.json -> model_version` | Direct (falls back to `"unknown"` for older bundles) |
 | `started_at` | `metadata.json -> created_at` | Direct (no separate start time) |
 | `completed_at` | `metadata.json -> created_at` | Same as started_at (duration=0) |
 | `metrics.rmse` | `metrics.json -> test_rmse` | Renamed |

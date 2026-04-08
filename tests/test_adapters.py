@@ -18,9 +18,10 @@ class TestAdaptP4Bundle:
         meta = adapt_p4_bundle(FIXTURES / "p4_bundle")
         assert meta.model_name == "lightgbm_default"
 
-    def test_maps_model_type_to_model_version(self):
+    def test_model_version_defaults_to_unknown(self):
+        """P4 fixture has no model_version field — adapter falls back to 'unknown'."""
         meta = adapt_p4_bundle(FIXTURES / "p4_bundle")
-        assert meta.model_version == "lightgbm"
+        assert meta.model_version == "unknown"
 
     def test_uses_test_metrics(self):
         meta = adapt_p4_bundle(FIXTURES / "p4_bundle")

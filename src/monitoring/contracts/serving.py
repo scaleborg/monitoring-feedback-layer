@@ -6,7 +6,7 @@ mobility-serving-layer/contracts/serving_observability.md.
 """
 
 from datetime import datetime, timezone
-from typing import Literal, Optional
+from typing import Literal
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -43,8 +43,8 @@ class ServingMetricsWindow(BaseModel):
     latency_p50_ms: float = Field(ge=0.0)
     latency_p95_ms: float = Field(ge=0.0)
     latency_p99_ms: float = Field(ge=0.0)
-    feature_lookup_p95_ms: Optional[float] = Field(default=None, ge=0.0)
-    model_exec_p95_ms: Optional[float] = Field(default=None, ge=0.0)
+    feature_lookup_p95_ms: float | None = Field(default=None, ge=0.0)
+    model_exec_p95_ms: float | None = Field(default=None, ge=0.0)
 
     # Error breakdown
     validation_error_count: int = Field(ge=0)
@@ -68,10 +68,10 @@ class ServingMetricsWindow(BaseModel):
     fallback_prediction_count: int = Field(ge=0)
 
     # Feature quality (optional)
-    missing_feature_count: Optional[int] = Field(default=None, ge=0)
-    default_imputed_feature_count: Optional[int] = Field(default=None, ge=0)
-    stale_feature_count: Optional[int] = Field(default=None, ge=0)
-    feature_vector_build_failure_count: Optional[int] = Field(default=None, ge=0)
+    missing_feature_count: int | None = Field(default=None, ge=0)
+    default_imputed_feature_count: int | None = Field(default=None, ge=0)
+    stale_feature_count: int | None = Field(default=None, ge=0)
+    feature_vector_build_failure_count: int | None = Field(default=None, ge=0)
 
     # Heartbeat
     heartbeat_emitted_at: datetime

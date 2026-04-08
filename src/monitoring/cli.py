@@ -21,14 +21,9 @@ def emit_lineage_dataset_build(
         load_dataset_metadata,
         persist_event,
     )
-    from monitoring.metrics.registry import record_dataset_build_duration
-
     meta = load_dataset_metadata(metadata_path)
     event = build_dataset_lineage_event(meta)
     log_file = persist_event(event)
-
-    # Also record the build duration if we can approximate it.
-    # For dataset builds, we don't have started_at, so we skip duration here.
     typer.echo(f"Lineage event written to {log_file}")
     typer.echo(event.model_dump_json(indent=2))
 

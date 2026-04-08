@@ -66,7 +66,7 @@ def adapt_p2_parquet(parquet_path: Path) -> DatasetMetadata:
 
 
 def adapt_p4_bundle(bundle_dir: Path) -> TrainingMetadata:
-    """Build a TrainingMetadata from a real P4 inference-bundle directory.
+    """Build a TrainingMetadata from a real P4 training-bundle directory.
 
     Reads metadata.json + metrics.json from the bundle and maps fields
     to the P6 contract.  Fields not present in P4 are derived with
@@ -100,7 +100,7 @@ def adapt_p4_bundle(bundle_dir: Path) -> TrainingMetadata:
     return TrainingMetadata(
         run_id=run_id,
         model_name=candidate_name,
-        model_version=model_type,
+        model_version=meta_raw.get("model_version", "unknown"),
         input_dataset_name=input_dataset_name,
         input_dataset_version=input_dataset_version,
         started_at=started_at,

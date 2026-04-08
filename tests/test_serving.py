@@ -229,8 +229,10 @@ class TestServingMetricsIngestion:
 
     def test_rejects_naive_timestamp(self):
         """Naive (no timezone) timestamps are rejected at the contract level."""
+        from pydantic import ValidationError
+
         raw = _make_window(window_start="2026-04-07T10:00:00")
-        with pytest.raises(Exception):
+        with pytest.raises((ValidationError, TypeError)):
             ServingMetricsWindow.model_validate(raw)
 
 

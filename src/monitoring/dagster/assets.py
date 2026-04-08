@@ -34,7 +34,7 @@ def validation_result() -> dict:
 def freshness_result() -> dict:
     """Compute feature freshness from real P2 dataset metadata."""
     from monitoring.contracts.adapters import adapt_p2_parquet
-    from monitoring.freshness.compute import FreshnessResult, compute_freshness
+    from monitoring.freshness.compute import compute_freshness
 
     # Adapt real P2 parquet → DatasetMetadata, then serialize to temp JSON
     # for the freshness compute function.
